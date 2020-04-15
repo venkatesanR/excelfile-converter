@@ -7,15 +7,19 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.*;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ExcelFileDownConverter {
     private String inputFileLocation;
     private String outputLocation;
+    private HSSFWorkbook workBookOut;
+    private Map<Short, CellStyle> formatCellStyleMap = new ConcurrentHashMap<>();
 
     public static void main(String[] args) throws IOException {
-        String filename = "/home/venkatesan/ROOT_DIR/file_example_XLSX_50.xlsx";
+        String filename = "/home/venkatesan/ROOT_DIR/sample-xlsx-file-for-testing.xlsx";
         ExcelFileDownConverter converter = new ExcelFileDownConverter(filename);
         converter.convert();
     }
@@ -40,9 +44,9 @@ public class ExcelFileDownConverter {
             System.out.println("No valid xlsh workbook found");
             return;
         }
-        Workbook wbOut = new HSSFWorkbook();
-        copySheets(wbIn.get(), wbOut);
-        createOutputFile(wbOut);
+        workBookOut = new HSSFWorkbook();
+        copySheets(wbIn.get());
+        createOutputFile();
     }
 
     Optional<XSSFWorkbook> createInputWorkBook() {
@@ -56,9 +60,9 @@ public class ExcelFileDownConverter {
         return Optional.empty();
     }
 
-    void copySheets(XSSFWorkbook wbIn, Workbook wbOut) {
+    void copySheets(XSSFWorkbook wbIn) {
         wbIn.sheetIterator().forEachRemaining((sIn) -> {
-            Sheet sOut = wbOut.createSheet(sIn.getSheetName());
+            Sheet sOut = workBookOut.createSheet(sIn.getSheetName());
             sIn.rowIterator().forEachRemaining(row -> copyRow(sOut, row));
         });
     }
@@ -73,28 +77,46 @@ public class ExcelFileDownConverter {
 
         if (cellIn.getCellType() == CellType.BOOLEAN) {
             cellOut.setCellValue(cellIn.getBooleanCellValue());
-
         } else if (cellIn.getCellType() == CellType.ERROR) {
             cellOut.setCellValue(cellIn.getErrorCellValue());
         } else if (cellIn.getCellType() == CellType.FORMULA) {
             cellOut.setCellFormula(cellIn.getCellFormula());
         } else if (cellIn.getCellType() == CellType.NUMERIC) {
-            cellOut.setCellValue(cellIn.getNumericCellValue());
+            if (DateUtil.isCellDateFormatted(cellIn)) {
+                cellOut.setCellValue(cellIn.getDateCellValue());
+            } else {
+                cellOut.setCellValue(cellIn.getNumericCellValue());
+            }
         } else if (cellIn.getCellType() == CellType.STRING) {
             cellOut.setCellValue(cellIn.getStringCellValue());
         }
 
-        {
+        Short formatterKey = cellIn.getCellStyle().getDataFormat();
+        updateCellStyleFromCache(cellIn, cellOut, formatterKey);
+    }
+
+    private void updateCellStyleFromCache(Cell cellIn, Cell cellOut, Short formatterKey) {
+        CellStyle styleOut = formatCellStyleMap.get(formatterKey);
+        if (styleOut == null) {
+            styleOut = workBookOut.createCellStyle();
+            formatCellStyleMap.put(formatterKey, styleOut);
+        } else {
+            styleOut.setDataFormat(formatterKey.shortValue());
+            cellOut.setCellStyle(styleOut);
+        }
+
+        if (styleOut == null) {
             CellStyle styleIn = cellIn.getCellStyle();
-            CellStyle styleOut = cellOut.getCellStyle();
+            styleOut = cellOut.getCellStyle();
             styleOut.setDataFormat(styleIn.getDataFormat());
         }
         cellOut.setCellComment(cellIn.getCellComment());
     }
 
-    private void createOutputFile(Workbook wbOut) {
+    private void createOutputFile() {
         try (OutputStream out = new BufferedOutputStream(new FileOutputStream(outputLocation))) {
-            wbOut.write(out);
+            workBookOut.write(out);
+            workBookOut.close();
             System.out.println("File created successfully on: " + outputLocation);
         } catch (IOException e) {
             System.out.println("Error while writing into outputfile: " + outputLocation);
