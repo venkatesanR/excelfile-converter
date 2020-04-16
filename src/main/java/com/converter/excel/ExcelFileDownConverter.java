@@ -18,7 +18,7 @@ public class ExcelFileDownConverter {
     private HSSFWorkbook workBookOut;
     private Map<Short, CellStyle> formatCellStyleMap = new ConcurrentHashMap<>();
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
         String filename = "/home/venkatesan/ROOT_DIR/sample-xlsx-file-for-testing.xlsx";
         ExcelFileDownConverter converter = new ExcelFileDownConverter(filename);
         converter.convert();
@@ -38,7 +38,7 @@ public class ExcelFileDownConverter {
                 .concat(filename.replace(".xlsx", ".xls"));
     }
 
-    void convert() throws IOException {
+    void convert() {
         Optional<XSSFWorkbook> wbIn = createInputWorkBook();
         if (!wbIn.isPresent()) {
             System.out.println("No valid xlsh workbook found");
@@ -82,11 +82,7 @@ public class ExcelFileDownConverter {
         } else if (cellIn.getCellType() == CellType.FORMULA) {
             cellOut.setCellFormula(cellIn.getCellFormula());
         } else if (cellIn.getCellType() == CellType.NUMERIC) {
-            if (DateUtil.isCellDateFormatted(cellIn)) {
-                cellOut.setCellValue(cellIn.getDateCellValue());
-            } else {
-                cellOut.setCellValue(cellIn.getNumericCellValue());
-            }
+            cellOut.setCellValue(cellIn.getNumericCellValue());
         } else if (cellIn.getCellType() == CellType.STRING) {
             cellOut.setCellValue(cellIn.getStringCellValue());
         }
@@ -96,27 +92,21 @@ public class ExcelFileDownConverter {
     }
 
     private void updateCellStyleFromCache(Cell cellIn, Cell cellOut, Short formatterKey) {
-        CellStyle styleOut = formatCellStyleMap.get(formatterKey);
-        if (styleOut == null) {
-            styleOut = workBookOut.createCellStyle();
-            formatCellStyleMap.put(formatterKey, styleOut);
-        } else {
-            styleOut.setDataFormat(formatterKey.shortValue());
-            cellOut.setCellStyle(styleOut);
-        }
-
-        if (styleOut == null) {
-            CellStyle styleIn = cellIn.getCellStyle();
-            styleOut = cellOut.getCellStyle();
-            styleOut.setDataFormat(styleIn.getDataFormat());
-        }
+        CellStyle styleOut = Optional.ofNullable(formatCellStyleMap.get(formatterKey))
+                .orElseGet(() -> {
+                    CellStyle newCellStyle = workBookOut.createCellStyle();
+                    formatCellStyleMap.put(formatterKey, newCellStyle);
+                    return newCellStyle;
+                });
+        styleOut.setDataFormat(formatterKey);
+        cellOut.setCellStyle(styleOut);
         cellOut.setCellComment(cellIn.getCellComment());
     }
 
     private void createOutputFile() {
-        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(outputLocation))) {
-            workBookOut.write(out);
-            workBookOut.close();
+        try (Workbook outBook = workBookOut;
+             OutputStream out = new BufferedOutputStream(new FileOutputStream(outputLocation))) {
+            outBook.write(out);
             System.out.println("File created successfully on: " + outputLocation);
         } catch (IOException e) {
             System.out.println("Error while writing into outputfile: " + outputLocation);
